@@ -1,0 +1,15 @@
+__pycache__/
+*.pyc
+*.pyo
+.env
+config/settings.ini
+models/saved/
+exports/
+*.xlsx
+!sql/
+.fis_meta.json
+*.egg-info/
+dist/
+build/
+.venv/
+venv/

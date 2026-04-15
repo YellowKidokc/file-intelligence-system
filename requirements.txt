@@ -1,0 +1,28 @@
+# NLP Engines
+yake==0.4.8
+spacy==3.7.6
+keybert==0.8.5
+model2vec==0.3.0
+
+# Audio/Video transcription
+faster-whisper==1.1.0
+
+# Learning Layer
+scikit-learn==1.5.2
+river==0.21.2
+
+# Database
+psycopg2-binary==2.9.10
+
+# File watching
+watchdog==6.0.0
+
+# UI
+PySide6==6.8.1
+
+# Utilities
+openpyxl==3.1.5
+python-dotenv==1.0.1
+
+# spaCy model (run after install)
+# python -m spacy download en_core_web_sm
