@@ -8,8 +8,11 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from fis.db.connection import get_config
+from fis.log import get_logger
 from fis.pipeline import FISPipeline
 from fis.renamer import rename_file
+
+log = get_logger("watcher")
 
 
 class FISHandler(FileSystemEventHandler):
@@ -66,17 +69,18 @@ class FISHandler(FileSystemEventHandler):
                     result["proposed_name"],
                     result["file_id"],
                 )
-                print(f"[AUTO] {result['original_name']} -> {result['proposed_name']}")
+                log.info("AUTO %s -> %s", result['original_name'], result['proposed_name'])
             elif result.get("status") == "pending":
-                print(f"[QUEUE] {result['original_name']} -> {result['proposed_name']} "
-                      f"(confidence: {result['confidence']:.0f})")
+                log.info("QUEUE %s -> %s (confidence: %.0f)",
+                         result['original_name'], result['proposed_name'], result['confidence'])
             elif result.get("status") == "kickout":
-                print(f"[KICKOUT] {result['original_name']} "
-                      f"(confidence: {result.get('confidence', 0):.0f})")
+                log.info("KICKOUT %s (confidence: %.0f)",
+                         result['original_name'], result.get('confidence', 0))
             elif result.get("status") == "duplicate":
-                print(f"[SKIP] {Path(file_path).name} is duplicate of {result['existing_id']}")
+                log.info("SKIP %s is duplicate of %s",
+                         Path(file_path).name, result['existing_id'])
         except Exception as e:
-            print(f"[ERROR] {file_path}: {e}")
+            log.error("%s: %s", file_path, e)
 
 
 def start_watcher():
@@ -88,7 +92,7 @@ def start_watcher():
     folders = [f.strip() for f in folders_raw.split(",") if f.strip()]
 
     if not folders:
-        print("No watch folders configured in settings.ini")
+        log.error("No watch folders configured in settings.ini")
         sys.exit(1)
 
     handler = FISHandler(pipeline, config)
@@ -97,20 +101,19 @@ def start_watcher():
     for folder in folders:
         if Path(folder).exists():
             observer.schedule(handler, folder, recursive=True)
-            print(f"Watching: {folder}")
+            log.info("Watching: %s", folder)
         else:
-            print(f"Warning: folder not found, skipping: {folder}")
+            log.warning("Folder not found, skipping: %s", folder)
 
     observer.start()
-    print(f"\nFIS Watcher running. Monitoring {len(folders)} folders.")
-    print("Press Ctrl+C to stop.\n")
+    log.info("FIS Watcher running. Monitoring %d folders.", len(folders))
 
     try:
         while True:
             time.sleep(1)
     except KeyboardInterrupt:
         observer.stop()
-        print("\nFIS Watcher stopped.")
+        log.info("FIS Watcher stopped.")
 
     observer.join()
 

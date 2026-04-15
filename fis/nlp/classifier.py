@@ -149,6 +149,13 @@ class FISClassifier:
             return rule
         return ml
 
+    def _expand_encoder(self, encoder: LabelEncoder, new_labels: list[str]):
+        """Expand a LabelEncoder's classes to include any new labels."""
+        existing = set(encoder.classes_) if hasattr(encoder, 'classes_') else set()
+        unseen = set(new_labels) - existing
+        if unseen:
+            encoder.classes_ = np.array(sorted(existing | unseen))
+
     def learn(self, texts: list[str], keywords_list: list[list[dict]],
               domains: list[str], subjects: list[str]):
         """Update the classifier from a batch of corrections."""
@@ -163,15 +170,26 @@ class FISClassifier:
             X = self.vectorizer.fit_transform(combined)
             y_domain = self.domain_encoder.transform(domains)
             y_subject = self.subject_encoder.transform(subjects)
+            all_domain_classes = np.arange(len(self.domain_encoder.classes_))
+            all_subject_classes = np.arange(len(self.subject_encoder.classes_))
             self.domain_clf.fit(X, y_domain)
             self.subject_clf.fit(X, y_subject)
+            # Ensure partial_fit knows all classes for future updates
+            self.domain_clf.classes_ = all_domain_classes
+            self.subject_clf.classes_ = all_subject_classes
             self._fitted = True
         else:
-            # Incremental update
+            # Expand encoders to handle previously unseen labels
+            self._expand_encoder(self.domain_encoder, domains)
+            self._expand_encoder(self.subject_encoder, subjects)
+
             X = self.vectorizer.transform(combined)
             y_domain = self.domain_encoder.transform(domains)
             y_subject = self.subject_encoder.transform(subjects)
-            self.domain_clf.partial_fit(X, y_domain)
-            self.subject_clf.partial_fit(X, y_subject)
+
+            all_domain_classes = np.arange(len(self.domain_encoder.classes_))
+            all_subject_classes = np.arange(len(self.subject_encoder.classes_))
+            self.domain_clf.partial_fit(X, y_domain, classes=all_domain_classes)
+            self.subject_clf.partial_fit(X, y_subject, classes=all_subject_classes)
 
         self.save()

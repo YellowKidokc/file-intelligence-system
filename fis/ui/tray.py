@@ -2,10 +2,14 @@
 
 import sys
 
+from PySide6.QtCore import QTimer
 from PySide6.QtGui import QAction, QIcon
 from PySide6.QtWidgets import QApplication, QMenu, QSystemTrayIcon
 
 from fis.db.models import get_pending_files
+from fis.log import get_logger
+
+log = get_logger("tray")
 
 
 class FISTray:
@@ -48,6 +52,14 @@ class FISTray:
         self.tray.activated.connect(self._on_activate)
         self.tray.show()
 
+        # Periodic pending count updates (every 30 seconds)
+        self._timer = QTimer()
+        self._timer.timeout.connect(self.update_pending_count)
+        self._timer.start(30_000)
+
+        # Initial count
+        self.update_pending_count()
+
     def update_pending_count(self):
         try:
             files = get_pending_files(limit=1000)
@@ -72,3 +84,11 @@ class FISTray:
     def _export_kickouts(self):
         from fis.export_kickouts import export_kickouts
         export_kickouts()
+
+
+def launch_tray():
+    """Launch the system tray icon standalone."""
+    app = QApplication.instance() or QApplication(sys.argv)
+    tray = FISTray(app)
+    log.info("System tray active.")
+    app.exec()

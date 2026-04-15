@@ -107,15 +107,13 @@ class FISAPIHandler(BaseHTTPRequestHandler):
             if not file_id:
                 self._json_response({"error": "file_id required"}, 400)
                 return
-            from fis.db.models import get_pending_files, update_file_status
             from fis.renamer import rename_file
             # Find the file
-            from fis.db.connection import get_connection
-            conn = get_connection()
-            with conn.cursor() as cur:
-                cur.execute("SELECT * FROM files WHERE file_id = %s", (file_id,))
-                f = cur.fetchone()
-            conn.close()
+            from fis.db.models import _db
+            with _db() as conn:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT * FROM files WHERE file_id = %s", (file_id,))
+                    f = cur.fetchone()
             if f and f["proposed_name"]:
                 rename_file(f["file_path"], f["proposed_name"], f["file_id"])
                 self._json_response({"status": "approved", "new_name": f["proposed_name"]})
@@ -206,16 +204,15 @@ class FISAPIHandler(BaseHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Headers", "Content-Type")
 
     def log_message(self, format, *args):
-        # Clean single-line logging
-        print(f"[API] {args[0]}" if args else "")
+        from fis.log import get_logger
+        get_logger("api").info(args[0] if args else "")
 
 
 def start_api(port=8420):
+    from fis.log import get_logger
+    log = get_logger("api")
     server = HTTPServer(("0.0.0.0", port), FISAPIHandler)
-    print(f"FIS API running on http://localhost:{port}")
-    print(f"Endpoints: /classify, /classify-text, /pending, /approve, /search,")
-    print(f"           /codes, /tag, /bil/learn, /bil/predict, /bil/web,")
-    print(f"           /bil/clipboard, /bil/export, /health")
+    log.info("FIS API running on http://localhost:%d", port)
     server.serve_forever()
 
 

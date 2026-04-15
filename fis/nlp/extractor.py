@@ -2,6 +2,10 @@
 
 from pathlib import Path
 
+from fis.log import get_logger
+
+log = get_logger("extractor")
+
 
 def extract_text(file_path: str) -> str:
     """Extract text content from a file based on its extension."""
@@ -46,7 +50,10 @@ def _read_pdf(path: Path) -> str:
         doc.close()
         return text
     except ImportError:
-        print("PyMuPDF not installed. pip install PyMuPDF")
+        log.warning("PyMuPDF not installed — pip install PyMuPDF")
+        return ""
+    except Exception as e:
+        log.error("PDF extraction failed for %s: %s", path, e)
         return ""
 
 
@@ -57,7 +64,10 @@ def _read_docx(path: Path) -> str:
         doc = Document(str(path))
         return "\n".join(p.text for p in doc.paragraphs)
     except ImportError:
-        print("python-docx not installed. pip install python-docx")
+        log.warning("python-docx not installed — pip install python-docx")
+        return ""
+    except Exception as e:
+        log.error("DOCX extraction failed for %s: %s", path, e)
         return ""
 
 
@@ -75,7 +85,8 @@ def _read_excel(path: Path) -> str:
                     text_parts.append(" ".join(cells))
         wb.close()
         return "\n".join(text_parts)
-    except Exception:
+    except Exception as e:
+        log.error("Excel extraction failed for %s: %s", path, e)
         return ""
 
 
@@ -94,7 +105,10 @@ def _transcribe_audio(path: Path) -> str:
         segments, _ = model.transcribe(str(path))
         return " ".join(seg.text for seg in segments)
     except ImportError:
-        print("faster-whisper not installed. pip install faster-whisper")
+        log.warning("faster-whisper not installed — pip install faster-whisper")
+        return ""
+    except Exception as e:
+        log.error("Audio transcription failed for %s: %s", path, e)
         return ""
 
 

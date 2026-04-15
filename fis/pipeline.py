@@ -6,6 +6,7 @@ from fis.db.connection import get_config
 from fis.db.models import (
     compute_sha256,
     file_exists_by_hash,
+    get_next_sequence_id,
     insert_file,
     insert_tags,
 )
@@ -127,10 +128,13 @@ class FISPipeline:
             status = "kickout"
 
         # Build proposed name: [slug]_[DOMAIN].[SUBJECTS]_[ID].ext
-        # ID gets filled after insert
         ext = path.suffix
 
-        # 8. Store in Postgres
+        # Get sequence ID first so proposed_name is set atomically with insert
+        seq_id = get_next_sequence_id()
+        proposed_name = f"{slug}_{domain}.{subject_str}_{seq_id}{ext}"
+
+        # 8. Store in Postgres (proposed_name and sequence_id included in initial insert)
         result = insert_file(
             original_name=path.name,
             file_path=str(path.resolve()),
@@ -138,25 +142,11 @@ class FISPipeline:
             domain=domain,
             subject_codes=subjects,
             slug=slug,
+            proposed_name=proposed_name,
             confidence=confidence,
             status=status,
+            sequence_id=seq_id,
         )
-
-        seq_id = result["sequence_id"]
-        proposed_name = f"{slug}_{domain}.{subject_str}_{seq_id}{ext}"
-
-        # Update proposed name
-        from fis.db.connection import get_connection
-        conn = get_connection()
-        try:
-            with conn.cursor() as cur:
-                cur.execute(
-                    "UPDATE files SET proposed_name = %s WHERE file_id = %s",
-                    (proposed_name, result["file_id"]),
-                )
-            conn.commit()
-        finally:
-            conn.close()
 
         # Store tags
         tags = [{"tag": kw["keyword"], "source": kw["source"], "confidence": kw.get("score")}
