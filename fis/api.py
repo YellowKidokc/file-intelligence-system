@@ -19,6 +19,19 @@ Endpoints:
     POST /bil/clipboard     — clipboard event
     GET  /bil/export        — get today's daily digest
     GET  /health            — health check
+
+    --- Preference Engine ---
+    POST /pref/ingest       — ingest URLs (bulk or single)
+    POST /pref/like         — like a link or file
+    POST /pref/dislike      — dislike a link or file
+    POST /pref/rate         — rate a link or file (1-10)
+    GET  /pref/links        — list ingested links
+    GET  /pref/unrated      — get unrated links queue
+    POST /pref/train        — run preference feedback loop
+    GET  /pref/taste        — get computed taste profile
+    GET  /pref/suggestions  — BIL-powered suggestions
+    POST /pref/score        — score a specific link
+    GET  /pref/stats        — preference + link stats
 """
 
 import json
@@ -29,6 +42,9 @@ from urllib.parse import parse_qs, urlparse
 class FISAPIHandler(BaseHTTPRequestHandler):
     _pipeline = None
     _bil = None
+    _pref_engine = None
+    _link_intel = None
+    _feedback_loop = None
 
     @classmethod
     def get_pipeline(cls):
@@ -43,6 +59,27 @@ class FISAPIHandler(BaseHTTPRequestHandler):
             from fis.bil.bil_api import BIL
             cls._bil = BIL()
         return cls._bil
+
+    @classmethod
+    def get_pref_engine(cls):
+        if cls._pref_engine is None:
+            from fis.preference.engine import PreferenceEngine
+            cls._pref_engine = PreferenceEngine()
+        return cls._pref_engine
+
+    @classmethod
+    def get_link_intel(cls):
+        if cls._link_intel is None:
+            from fis.preference.links import LinkIntelligence
+            cls._link_intel = LinkIntelligence()
+        return cls._link_intel
+
+    @classmethod
+    def get_feedback_loop(cls):
+        if cls._feedback_loop is None:
+            from fis.preference.feedback import FeedbackLoop
+            cls._feedback_loop = FeedbackLoop()
+        return cls._feedback_loop
 
     def do_GET(self):
         path = urlparse(self.path).path
@@ -68,6 +105,45 @@ class FISAPIHandler(BaseHTTPRequestHandler):
             with open(export_path, "r") as f:
                 digest = json.load(f)
             self._json_response(digest)
+
+        # --- Preference Engine GET routes ---
+
+        elif path == "/pref/links":
+            query = parse_qs(urlparse(self.path).query)
+            li = self.get_link_intel()
+            links = li.list_links(
+                limit=int(query.get("limit", [50])[0]),
+                offset=int(query.get("offset", [0])[0]),
+                source=query.get("source", [None])[0],
+                fis_domain=query.get("domain", [None])[0],
+                unclassified_only=query.get("unclassified", [""])[0] == "1",
+            )
+            self._json_response({"links": links, "count": len(links)})
+
+        elif path == "/pref/unrated":
+            query = parse_qs(urlparse(self.path).query)
+            pe = self.get_pref_engine()
+            unrated = pe.get_unrated(limit=int(query.get("limit", [20])[0]))
+            self._json_response({"links": unrated, "count": len(unrated)})
+
+        elif path == "/pref/taste":
+            pe = self.get_pref_engine()
+            profile = pe.taste_profile()
+            self._json_response(profile)
+
+        elif path == "/pref/suggestions":
+            query = parse_qs(urlparse(self.path).query)
+            fl = self.get_feedback_loop()
+            suggestions = fl.suggest(limit=int(query.get("limit", [10])[0]))
+            self._json_response({"suggestions": suggestions, "count": len(suggestions)})
+
+        elif path == "/pref/stats":
+            li = self.get_link_intel()
+            pe = self.get_pref_engine()
+            self._json_response({
+                "links": li.stats(),
+                "preferences": pe.stats(),
+            })
 
         else:
             self._json_response({"error": "not found"}, 404)
@@ -172,6 +248,102 @@ class FISAPIHandler(BaseHTTPRequestHandler):
             signal = 1.0 if used else 0.0
             self.get_bil().learn("clipboard", features, signal)
             self._json_response({"status": "ok"})
+
+        # --- Preference Engine POST routes ---
+
+        elif path == "/pref/ingest":
+            li = self.get_link_intel()
+            urls = body.get("urls", [])
+            text = body.get("text", "")
+            source = body.get("source", "api")
+
+            if urls:
+                # Direct URL list (strings or objects)
+                result = li.ingest_batch(urls, source=source)
+            elif text:
+                # Free text with URLs to extract
+                from fis.preference.ingest import BulkIngestor
+                bi = BulkIngestor()
+                result = bi.from_text(text, source=source)
+            else:
+                self._json_response({"error": "urls (array) or text (string) required"}, 400)
+                return
+            self._json_response(result)
+
+        elif path == "/pref/like":
+            pe = self.get_pref_engine()
+            pref = pe.like(
+                link_id=body.get("link_id"),
+                file_id=body.get("file_id"),
+                tags=body.get("tags"),
+                note=body.get("note"),
+            )
+            self._json_response({"status": "liked", "pref": pref})
+
+        elif path == "/pref/dislike":
+            pe = self.get_pref_engine()
+            pref = pe.dislike(
+                link_id=body.get("link_id"),
+                file_id=body.get("file_id"),
+                tags=body.get("tags"),
+                note=body.get("note"),
+            )
+            self._json_response({"status": "disliked", "pref": pref})
+
+        elif path == "/pref/rate":
+            pe = self.get_pref_engine()
+            score = body.get("score")
+            if not score:
+                self._json_response({"error": "score (1-10) required"}, 400)
+                return
+            pref = pe.rate(
+                score=int(score),
+                link_id=body.get("link_id"),
+                file_id=body.get("file_id"),
+                tags=body.get("tags"),
+                note=body.get("note"),
+            )
+            self._json_response({"status": "rated", "pref": pref})
+
+        elif path == "/pref/train":
+            fl = self.get_feedback_loop()
+            result = fl.train_cycle()
+            self._json_response(result)
+
+        elif path == "/pref/score":
+            link_id = body.get("link_id")
+            if not link_id:
+                self._json_response({"error": "link_id required"}, 400)
+                return
+            fl = self.get_feedback_loop()
+            result = fl.score_link(int(link_id))
+            self._json_response(result)
+
+        elif path == "/pref/search":
+            li = self.get_link_intel()
+            query = body.get("query", "")
+            if not query:
+                self._json_response({"error": "query required"}, 400)
+                return
+            results = li.search(
+                query, limit=body.get("limit", 20),
+                fis_domain=body.get("domain"),
+            )
+            self._json_response({"results": results, "count": len(results)})
+
+        elif path == "/pref/enrich":
+            li = self.get_link_intel()
+            link_id = body.get("link_id")
+            if not link_id:
+                self._json_response({"error": "link_id required"}, 400)
+                return
+            link = li.enrich(
+                link_id=int(link_id),
+                title=body.get("title"),
+                description=body.get("description"),
+                content_text=body.get("content_text"),
+            )
+            self._json_response(link)
 
         else:
             self._json_response({"error": "not found"}, 404)
