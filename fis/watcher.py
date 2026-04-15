@@ -1,4 +1,8 @@
-"""File watcher — monitors folders and triggers the FIS pipeline."""
+"""File watcher — monitors folders and triggers the FIS pipeline.
+
+Routes .md files with YAML frontmatter to the recon ingest pipeline.
+All other files go through the standard NLP pipeline.
+"""
 
 import sys
 import time
@@ -16,7 +20,11 @@ log = get_logger("watcher")
 
 
 class FISHandler(FileSystemEventHandler):
-    """Handles file creation/modification events."""
+    """Handles file creation/modification events.
+
+    Routes .md files with YAML frontmatter to recon ingest.
+    All other files go through the standard pipeline.
+    """
 
     def __init__(self, pipeline: FISPipeline, config):
         self.pipeline = pipeline
@@ -25,6 +33,7 @@ class FISHandler(FileSystemEventHandler):
             ext.strip()
             for ext in config.get("watcher", "ignore_extensions", fallback="").split(",")
         ]
+        self.recon_enabled = config.get("recon", "enabled", fallback="true").lower() == "true"
         self._pending = {}
 
     def on_created(self, event):
@@ -61,7 +70,16 @@ class FISHandler(FileSystemEventHandler):
     def _process(self, file_path: str):
         self._pending.pop(file_path, None)
         try:
-            result = self.pipeline.process(file_path)
+            # Route .md files with frontmatter to recon ingest
+            path = Path(file_path)
+            if (self.recon_enabled
+                    and path.suffix.lower() == ".md"
+                    and self._has_frontmatter(file_path)):
+                from fis.recon.recon_ingest import ingest
+                result = ingest(file_path)
+            else:
+                result = self.pipeline.process(file_path)
+
             if result.get("status") == "auto":
                 # Auto-rename high confidence files
                 rename_file(
@@ -81,6 +99,16 @@ class FISHandler(FileSystemEventHandler):
                          Path(file_path).name, result['existing_id'])
         except Exception as e:
             log.error("%s: %s", file_path, e)
+
+    @staticmethod
+    def _has_frontmatter(file_path: str) -> bool:
+        """Quick check: does this file start with YAML frontmatter (---)."""
+        try:
+            with open(file_path, "r", encoding="utf-8") as f:
+                first_line = f.readline().strip()
+                return first_line == "---"
+        except (OSError, UnicodeDecodeError):
+            return False
 
 
 def start_watcher():
