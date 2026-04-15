@@ -1,10 +1,21 @@
 """Database operations for FIS."""
 
 import hashlib
+from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
 from fis.db.connection import get_connection
+
+
+@contextmanager
+def _db():
+    """Context manager for database connections — guarantees cleanup."""
+    conn = get_connection()
+    try:
+        yield conn
+    finally:
+        conn.close()
 
 
 def compute_sha256(file_path: str) -> str:
@@ -16,24 +27,18 @@ def compute_sha256(file_path: str) -> str:
 
 
 def get_next_sequence_id() -> str:
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(MAX(file_id), 0) + 1 AS next_id FROM files")
+            cur.execute("SELECT COALESCE(MAX(sequence_id::int), 0) + 1 AS next_id FROM files")
             row = cur.fetchone()
             return str(row["next_id"]).zfill(6)
-    finally:
-        conn.close()
 
 
 def file_exists_by_hash(sha256: str) -> dict | None:
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM files WHERE sha256 = %s LIMIT 1", (sha256,))
             return cur.fetchone()
-    finally:
-        conn.close()
 
 
 def insert_file(
@@ -46,10 +51,10 @@ def insert_file(
     proposed_name: str = None,
     confidence: float = None,
     status: str = "pending",
+    sequence_id: str = None,
 ) -> dict:
-    seq_id = get_next_sequence_id()
-    conn = get_connection()
-    try:
+    seq_id = sequence_id or get_next_sequence_id()
+    with _db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -68,13 +73,10 @@ def insert_file(
             )
             conn.commit()
             return cur.fetchone()
-    finally:
-        conn.close()
 
 
 def update_file_status(file_id: int, status: str, final_name: str = None):
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -85,13 +87,10 @@ def update_file_status(file_id: int, status: str, final_name: str = None):
                 (status, final_name, file_id),
             )
             conn.commit()
-    finally:
-        conn.close()
 
 
 def insert_tags(file_id: int, tags: list[dict]):
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             for tag in tags:
                 cur.execute(
@@ -102,13 +101,10 @@ def insert_tags(file_id: int, tags: list[dict]):
                     (file_id, tag["tag"], tag.get("source", "yake"), tag.get("confidence")),
                 )
             conn.commit()
-    finally:
-        conn.close()
 
 
 def insert_correction(file_id: int, old: dict, new: dict):
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -124,26 +120,20 @@ def insert_correction(file_id: int, old: dict, new: dict):
                 ),
             )
             conn.commit()
-    finally:
-        conn.close()
 
 
 def get_pending_files(limit: int = 50) -> list:
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 "SELECT * FROM files WHERE status = 'pending' ORDER BY created_at DESC LIMIT %s",
                 (limit,),
             )
             return cur.fetchall()
-    finally:
-        conn.close()
 
 
 def get_subject_codes(domain: str = None) -> list:
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             if domain:
                 cur.execute(
@@ -153,13 +143,10 @@ def get_subject_codes(domain: str = None) -> list:
             else:
                 cur.execute("SELECT * FROM subject_codes")
             return cur.fetchall()
-    finally:
-        conn.close()
 
 
 def search_files(query: str, limit: int = 20) -> list:
-    conn = get_connection()
-    try:
+    with _db() as conn:
         with conn.cursor() as cur:
             cur.execute(
                 """
@@ -177,5 +164,3 @@ def search_files(query: str, limit: int = 20) -> list:
                 (f"%{query}%", f"%{query}%", f"%{query}%", f"%{query}%", limit),
             )
             return cur.fetchall()
-    finally:
-        conn.close()

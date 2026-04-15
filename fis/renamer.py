@@ -76,24 +76,24 @@ def _rename_obsidian(old_path: Path, new_name: str, config):
 
 def _write_obsidian_frontmatter(file_path: Path, new_name: str):
     """Add/update FIS metadata in Obsidian note frontmatter."""
-    content = file_path.read_text(encoding="utf-8")
+    import re
 
-    # Parse the new name for metadata
-    parts = new_name.replace(file_path.suffix, "").split("_")
+    content = file_path.read_text(encoding="utf-8")
     fis_meta = f"fis_name: \"{new_name}\""
 
-    if content.startswith("---"):
-        # Frontmatter exists — add/update fis fields
-        end = content.index("---", 3)
-        frontmatter = content[3:end]
+    # Match frontmatter: starts at line 1 with ---, ends at next --- on its own line
+    fm_pattern = re.compile(r"\A---\r?\n(.*?\r?\n)---\r?\n", re.DOTALL)
+    match = fm_pattern.match(content)
+
+    if match:
+        frontmatter = match.group(1)
+        after = content[match.end():]
         if "fis_name:" in frontmatter:
-            # Update existing
-            lines = frontmatter.split("\n")
-            lines = [l if not l.startswith("fis_name:") else fis_meta for l in lines]
-            frontmatter = "\n".join(lines)
+            # Update existing fis_name line
+            frontmatter = re.sub(r"^fis_name:.*$", fis_meta, frontmatter, flags=re.MULTILINE)
         else:
-            frontmatter = frontmatter.rstrip() + "\n" + fis_meta + "\n"
-        content = "---" + frontmatter + "---" + content[end + 3:]
+            frontmatter = frontmatter.rstrip("\n") + "\n" + fis_meta + "\n"
+        content = f"---\n{frontmatter}---\n{after}"
     else:
         # No frontmatter — add it
         content = f"---\n{fis_meta}\n---\n{content}"

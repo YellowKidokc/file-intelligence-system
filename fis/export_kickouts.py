@@ -28,8 +28,11 @@ def export_kickouts(output_path: str = "kickouts.xlsx"):
     finally:
         conn.close()
 
+    from fis.log import get_logger
+    log = get_logger("export")
+
     if not rows:
-        print("No pending or kickout files to export.")
+        log.info("No pending or kickout files to export.")
         return
 
     wb = Workbook()
@@ -81,7 +84,7 @@ def export_kickouts(output_path: str = "kickouts.xlsx"):
         ws.column_dimensions[col[0].column_letter].width = min(max_len + 2, 40)
 
     wb.save(output_path)
-    print(f"Exported {len(rows)} files to {output_path}")
+    log.info("Exported %d files to %s", len(rows), output_path)
 
 
 def import_corrections(excel_path: str):
@@ -121,7 +124,8 @@ def import_corrections(excel_path: str):
         insert_correction(file_id, old, new)
         corrections += 1
 
-    print(f"Imported {corrections} corrections.")
+    from fis.log import get_logger
+    get_logger("export").info("Imported %d corrections.", corrections)
     wb.close()
 
 

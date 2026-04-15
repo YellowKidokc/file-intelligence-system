@@ -107,7 +107,8 @@ class BIL:
             digest["high_signal_events"] = []
 
         export_file.write_text(json.dumps(digest, indent=2, default=str), encoding="utf-8")
-        print(f"BIL daily digest exported to {export_file}")
+        from fis.log import get_logger
+        get_logger("bil").info("Daily digest exported to %s", export_file)
         return str(export_file)
 
     def _log_event(self, model_name: str, features: dict, signal: float):

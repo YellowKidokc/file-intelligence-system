@@ -17,6 +17,9 @@ def main():
         elif cmd == "popup":
             from fis.ui.popup import launch_popup
             launch_popup()
+        elif cmd == "tray":
+            from fis.ui.tray import launch_tray
+            launch_tray()
         elif cmd == "export":
             from fis.export_kickouts import export_kickouts
             export_kickouts()
@@ -42,20 +45,36 @@ def main():
             from fis.clipboard import start_clipboard_monitor
             start_clipboard_monitor()
         elif cmd == "all":
-            # Start everything: API + watcher + clipboard
-            import threading
+            # Start everything: API + watcher + clipboard (all as daemons)
             from fis.api import start_api
             from fis.clipboard import start_clipboard_monitor
             threading.Thread(target=start_api, daemon=True).start()
             threading.Thread(target=start_clipboard_monitor, daemon=True).start()
             start_watcher()  # Blocks on main thread
         else:
-            print(f"Unknown command: {cmd}")
-            print("Commands: watch, api, clipboard, all, backfill, popup,")
-            print("          export, import, init, seed, bil-export")
+            _print_usage(cmd)
     else:
         # Default: start watcher
         start_watcher()
+
+
+def _print_usage(bad_cmd=None):
+    if bad_cmd:
+        print(f"Unknown command: {bad_cmd}\n")
+    print("Usage: python -m fis <command>\n")
+    print("Commands:")
+    print("  watch       Start the file watcher (default)")
+    print("  api [port]  Start REST API (default port: 8420)")
+    print("  clipboard   Start clipboard monitor")
+    print("  all         Start watcher + API + clipboard")
+    print("  backfill    Batch process existing folders")
+    print("  popup       Open rename queue popup")
+    print("  tray        Start system tray icon")
+    print("  export      Export kickouts to Excel")
+    print("  import      Import corrections from Excel")
+    print("  init        Initialize database schema")
+    print("  seed        Seed subject codes")
+    print("  bil-export  Export BIL daily digest")
 
 
 if __name__ == "__main__":

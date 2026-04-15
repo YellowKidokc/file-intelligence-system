@@ -14,7 +14,8 @@ def init_db():
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
-        print("FIS database schema initialized.")
+        from fis.log import get_logger
+        get_logger("db").info("FIS database schema initialized.")
     finally:
         conn.close()
 

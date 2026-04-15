@@ -26,8 +26,10 @@ class ClipboardMonitor:
         self.running = False
 
     def start(self):
+        from fis.log import get_logger
+        self._log = get_logger("clipboard")
         self.running = True
-        print("Clipboard monitor running. Ctrl+C to stop.")
+        self._log.info("Clipboard monitor running.")
         while self.running:
             try:
                 text = self._get_clipboard_text()
@@ -36,7 +38,7 @@ class ClipboardMonitor:
                     self.last_text = text
                     self.last_copy_app = app
                     self._send_to_bil(text, app)
-                    print(f"[CLIP] {len(text)} chars from {app}")
+                    self._log.info("%d chars from %s", len(text), app)
             except Exception:
                 pass
             time.sleep(0.5)
@@ -92,7 +94,6 @@ def start_clipboard_monitor():
         monitor.start()
     except KeyboardInterrupt:
         monitor.stop()
-        print("\nClipboard monitor stopped.")
 
 
 if __name__ == "__main__":

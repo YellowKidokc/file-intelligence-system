@@ -48,8 +48,10 @@ class BILHandler(BaseHTTPRequestHandler):
 
 
 def start_bil_server(port=8420):
+    from fis.log import get_logger
+    log = get_logger("bil.server")
     server = HTTPServer(("localhost", port), BILHandler)
-    print(f"BIL server listening on http://localhost:{port}")
+    log.info("BIL server listening on http://localhost:%d", port)
     server.serve_forever()
 
 

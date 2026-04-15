@@ -40,12 +40,13 @@ chrome.tabs.onRemoved.addListener((tabId) => {
     if (data.active) {
       data.totalTime += now - data.lastActivated;
     }
-    // Send to BIL
+    // Send to BIL (include scroll/copy data captured from content script)
     sendToBIL({
       url: data.url,
       time_on_page: Math.round(data.totalTime / 1000),
+      scrolledBottom: data.scrolledBottom || false,
+      copied: data.copied || false,
       bookmarked: false,
-      copied: false,
     });
     delete tabTimes[tabId];
   }

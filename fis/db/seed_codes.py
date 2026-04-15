@@ -14,7 +14,8 @@ def seed_codes():
         with conn.cursor() as cur:
             cur.execute(sql)
         conn.commit()
-        print("Subject codes seeded.")
+        from fis.log import get_logger
+        get_logger("db").info("Subject codes seeded.")
     finally:
         conn.close()
 

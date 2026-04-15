@@ -5,8 +5,11 @@ import os
 import sys
 
 from fis.db.connection import get_config
+from fis.log import get_logger
 from fis.pipeline import FISPipeline
 from fis.renamer import rename_file
+
+log = get_logger("backfill")
 
 
 def backfill(target_path: str, dry_run: bool = False, auto_approve: bool = False):
@@ -42,25 +45,25 @@ def backfill(target_path: str, dry_run: bool = False, auto_approve: bool = False
 
                 if status == "auto" and not dry_run:
                     rename_file(file_path, result["proposed_name"], result["file_id"])
-                    print(f"  [AUTO] {fname} -> {result['proposed_name']}")
+                    log.info("AUTO %s -> %s", fname, result['proposed_name'])
                 elif status == "pending":
-                    print(f"  [QUEUE] {fname} -> {result.get('proposed_name', '?')} "
-                          f"({result.get('confidence', 0):.0f}%)")
+                    log.info("QUEUE %s -> %s (%.0f%%)",
+                             fname, result.get('proposed_name', '?'), result.get('confidence', 0))
                 elif status == "kickout":
-                    print(f"  [KICK] {fname} ({result.get('confidence', 0):.0f}%)")
+                    log.info("KICK %s (%.0f%%)", fname, result.get('confidence', 0))
                 elif status == "duplicate":
-                    print(f"  [DUP] {fname}")
+                    log.info("DUP %s", fname)
 
             except Exception as e:
                 results["error"] += 1
-                print(f"  [ERR] {fname}: {e}")
+                log.error("%s: %s", fname, e)
 
-    print(f"\n--- Backfill Complete ---")
-    print(f"Auto-renamed: {results['auto']}")
-    print(f"Pending review: {results['pending']}")
-    print(f"Kickouts: {results['kickout']}")
-    print(f"Duplicates: {results['duplicate']}")
-    print(f"Errors: {results['error']}")
+    log.info("--- Backfill Complete ---")
+    log.info("Auto-renamed: %d", results['auto'])
+    log.info("Pending review: %d", results['pending'])
+    log.info("Kickouts: %d", results['kickout'])
+    log.info("Duplicates: %d", results['duplicate'])
+    log.info("Errors: %d", results['error'])
 
 
 def main():
@@ -70,13 +73,12 @@ def main():
     args = parser.parse_args()
 
     if not os.path.isdir(args.path):
-        print(f"Error: {args.path} is not a directory")
+        log.error("%s is not a directory", args.path)
         sys.exit(1)
 
-    print(f"Backfilling: {args.path}")
+    log.info("Backfilling: %s", args.path)
     if args.dry_run:
-        print("(dry run — no files will be renamed)")
-    print()
+        log.info("(dry run — no files will be renamed)")
 
     backfill(args.path, dry_run=args.dry_run)
 
