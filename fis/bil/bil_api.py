@@ -17,6 +17,7 @@ from fis.bil.bil_models import (
     ClipboardModel,
     ContentModel,
     FileModel,
+    PreferenceModel,
     WebModel,
 )
 from fis.db.connection import get_config
@@ -31,6 +32,7 @@ class BIL:
             "clipboard": ClipboardModel(),
             "files": FileModel(),
             "content": ContentModel(),
+            "preference": PreferenceModel(),
         }
         config = get_config()
         self.export_path = Path(config.get("bil", "export_path", fallback="exports"))

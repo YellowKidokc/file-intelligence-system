@@ -114,3 +114,43 @@ class ContentModel(BaseModel):
         # Content model uses 0-10 gradient, normalize to 0-1
         normalized = signal / 10.0 if signal > 1 else signal
         super().learn(features, normalized)
+
+
+class PreferenceModel(BaseModel):
+    """Learns from explicit like/dislike/rate signals on links and files.
+
+    Features: domain indicators, subject codes, keywords, FIS confidence,
+              taste vector context, time features
+    Signal: 0 = dislike, 1 = like, 0.1-1.0 = rating
+
+    This model closes the feedback loop — instead of inferring preference
+    from behavior (time on page, scrolling), it learns directly from
+    explicit "I like this" / "I don't like this" signals.
+    """
+
+    def learn(self, features: dict, signal: float):
+        flat = self._flatten(features)
+        super().learn(flat, signal)
+
+    def predict(self, features: dict) -> float:
+        flat = self._flatten(features)
+        return super().predict(flat)
+
+    def _flatten(self, features: dict) -> dict:
+        flat = {}
+        for k, v in features.items():
+            if isinstance(v, bool):
+                flat[k] = 1 if v else 0
+            elif isinstance(v, (int, float)):
+                flat[k] = v
+            elif isinstance(v, str):
+                flat[f"{k}_{v}"] = 1
+            elif isinstance(v, list):
+                for item in v:
+                    flat[f"{k}_{item}"] = 1
+        return flat
+
+    def get_summary(self) -> dict:
+        base = super().get_summary()
+        base["description"] = "Explicit preference signals (like/dislike/rate)"
+        return base
