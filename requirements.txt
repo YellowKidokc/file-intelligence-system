@@ -23,6 +23,8 @@ PySide6==6.8.1
 # Utilities
 openpyxl==3.1.5
 python-dotenv==1.0.1
+psutil==6.1.0
+pywin32==308
 
 # spaCy model (run after install)
 # python -m spacy download en_core_web_sm

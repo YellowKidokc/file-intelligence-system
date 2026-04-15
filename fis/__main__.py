@@ -34,9 +34,25 @@ def main():
             from fis.bil.bil_api import BIL
             bil = BIL()
             bil.export_daily()
+        elif cmd == "api":
+            from fis.api import start_api
+            port = int(sys.argv[2]) if len(sys.argv) > 2 else 8420
+            start_api(port)
+        elif cmd == "clipboard":
+            from fis.clipboard import start_clipboard_monitor
+            start_clipboard_monitor()
+        elif cmd == "all":
+            # Start everything: API + watcher + clipboard
+            import threading
+            from fis.api import start_api
+            from fis.clipboard import start_clipboard_monitor
+            threading.Thread(target=start_api, daemon=True).start()
+            threading.Thread(target=start_clipboard_monitor, daemon=True).start()
+            start_watcher()  # Blocks on main thread
         else:
             print(f"Unknown command: {cmd}")
-            print("Commands: watch, backfill, popup, export, import, init, seed, bil-export")
+            print("Commands: watch, api, clipboard, all, backfill, popup,")
+            print("          export, import, init, seed, bil-export")
     else:
         # Default: start watcher
         start_watcher()
