@@ -29,6 +29,7 @@ class FISHandler(FileSystemEventHandler):
     def __init__(self, pipeline: FISPipeline, config):
         self.pipeline = pipeline
         self.debounce = int(config.get("watcher", "debounce_seconds", fallback="3"))
+        self.process_modified = config.get("watcher", "process_modified_events", fallback="false").lower() == "true"
         self.ignore_ext = [
             ext.strip()
             for ext in config.get("watcher", "ignore_extensions", fallback="").split(",")
@@ -43,6 +44,8 @@ class FISHandler(FileSystemEventHandler):
 
     def on_modified(self, event):
         if event.is_directory:
+            return
+        if not self.process_modified:
             return
         self._handle(event.src_path)
 
@@ -96,6 +99,9 @@ class FISHandler(FileSystemEventHandler):
                          result['original_name'], result.get('confidence', 0))
             elif result.get("status") == "duplicate":
                 log.info("SKIP %s is duplicate of %s",
+                         Path(file_path).name, result['existing_id'])
+            elif result.get("status") == "already_tracked":
+                log.info("SKIP %s already tracked as %s",
                          Path(file_path).name, result['existing_id'])
         except Exception as e:
             log.error("%s: %s", file_path, e)

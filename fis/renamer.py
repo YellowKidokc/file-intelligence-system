@@ -1,6 +1,7 @@
 """File renaming logic with Obsidian-aware handling."""
 
 import json
+import time
 import subprocess
 import urllib.parse
 from pathlib import Path
@@ -25,16 +26,18 @@ def rename_file(old_path: str, new_name: str, file_id: int):
 
     # Check if this file is inside the Obsidian vault
     if vault_path and str(old).startswith(vault_path) and old.suffix == ".md":
-        _rename_obsidian(old, new_name, config)
+        renamed_path = _rename_obsidian(old, new_name, config)
     else:
-        _rename_standard(old, new_name)
+        renamed_path = _rename_standard(old, new_name)
+
+    if renamed_path is None or not renamed_path.exists():
+        return
 
     # Update database
-    new_path = old.parent / new_name
-    update_file_status(file_id, "confirmed", new_name)
+    update_file_status(file_id, "confirmed", renamed_path.name)
 
     # Update folder metadata
-    _update_folder_meta(old.parent)
+    _update_folder_meta(renamed_path.parent)
 
 
 def _rename_standard(old_path: Path, new_name: str):
@@ -49,6 +52,7 @@ def _rename_standard(old_path: Path, new_name: str):
             new_path = old_path.parent / f"{stem}_{counter}{ext}"
             counter += 1
     old_path.rename(new_path)
+    return new_path
 
 
 def _rename_obsidian(old_path: Path, new_name: str, config):
@@ -69,9 +73,22 @@ def _rename_obsidian(old_path: Path, new_name: str, config):
 
     # Open the URI — Obsidian handles the rename internally
     subprocess.Popen(["cmd", "/c", "start", "", uri], shell=True)
+    new_path = old_path.parent / new_name
 
-    # Also write YAML frontmatter with FIS metadata
-    _write_obsidian_frontmatter(old_path, new_name)
+    timeout_secs = float(config.get("obsidian", "rename_timeout_seconds", fallback="2.5"))
+    interval_secs = 0.25
+    waited = 0.0
+    while waited < timeout_secs:
+        if new_path.exists():
+            _write_obsidian_frontmatter(new_path, new_name)
+            return new_path
+        time.sleep(interval_secs)
+        waited += interval_secs
+
+    # Obsidian URI can fail if app is closed; fall back to filesystem rename.
+    fallback_path = _rename_standard(old_path, new_name)
+    _write_obsidian_frontmatter(fallback_path, fallback_path.name)
+    return fallback_path
 
 
 def _write_obsidian_frontmatter(file_path: Path, new_name: str):

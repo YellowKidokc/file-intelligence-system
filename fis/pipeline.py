@@ -7,9 +7,9 @@ from fis.db.connection import get_config
 from fis.db.models import (
     compute_sha256,
     file_exists_by_hash,
+    file_exists_by_path,
     get_next_sequence_id,
-    insert_file,
-    insert_tags,
+    insert_file_with_tags,
 )
 from fis.nlp.classifier import FISClassifier
 from fis.nlp.engines import YakeEngine, SpacyEngine, KeyBERTEngine, text_to_slug
@@ -66,6 +66,16 @@ class FISPipeline:
         path = Path(file_path)
         if not path.exists():
             return {"error": f"File not found: {file_path}"}
+        resolved_path = str(path.resolve())
+
+        # Skip reprocessing files already tracked by path (modified events)
+        existing_by_path = file_exists_by_path(resolved_path)
+        if existing_by_path:
+            return {
+                "status": "already_tracked",
+                "existing_id": existing_by_path["sequence_id"],
+                "message": f"Already tracked: {existing_by_path['final_name'] or existing_by_path['original_name']}",
+            }
 
         # 1. Hash check — skip duplicates
         sha256 = compute_sha256(file_path)
@@ -81,12 +91,13 @@ class FISPipeline:
         text = extract_text(file_path)
         if not text.strip():
             # Can't classify empty files — still register them
-            result = insert_file(
+            result = insert_file_with_tags(
                 original_name=path.name,
-                file_path=str(path.resolve()),
+                file_path=resolved_path,
                 sha256=sha256,
                 status="kickout",
                 confidence=0.0,
+                tags=[],
             )
             return {
                 "status": "kickout",
@@ -135,10 +146,14 @@ class FISPipeline:
         seq_id = get_next_sequence_id()
         proposed_name = f"{slug}_{domain}.{subject_str}_{seq_id}{ext}"
 
-        # 8. Store in Postgres (proposed_name and sequence_id included in initial insert)
-        result = insert_file(
+        tags = [{"tag": kw["keyword"], "source": kw["source"], "confidence": kw.get("score")}
+                for kw in all_keywords]
+        for ent in spacy_entities:
+            tags.append({"tag": ent["entity"], "source": "spacy"})
+        # 8. Store file + tags in one transaction
+        result = insert_file_with_tags(
             original_name=path.name,
-            file_path=str(path.resolve()),
+            file_path=resolved_path,
             sha256=sha256,
             domain=domain,
             subject_codes=subjects,
@@ -147,14 +162,8 @@ class FISPipeline:
             confidence=confidence,
             status=status,
             sequence_id=seq_id,
+            tags=tags,
         )
-
-        # Store tags
-        tags = [{"tag": kw["keyword"], "source": kw["source"], "confidence": kw.get("score")}
-                for kw in all_keywords]
-        for ent in spacy_entities:
-            tags.append({"tag": ent["entity"], "source": "spacy"})
-        insert_tags(result["file_id"], tags)
 
         return {
             "status": status,
