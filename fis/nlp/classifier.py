@@ -70,6 +70,7 @@ class FISClassifier:
 
     def _rule_based_match(self, text: str, keywords: list[dict], entities: list[dict]) -> dict:
         """Match against subject code trigger words from the database."""
+        from fis.db.codes import resolve_domain, resolve_subject
         from fis.db.models import get_subject_codes
 
         codes = get_subject_codes()
@@ -81,7 +82,7 @@ class FISClassifier:
 
         for code in codes:
             score = 0
-            code_name = code["code"]
+            code_name = resolve_subject(code["code"])
 
             # Check trigger words
             if code.get("trigger_words"):
@@ -104,7 +105,7 @@ class FISClassifier:
             if score > 0:
                 scores[code_name] = {
                     "score": score,
-                    "domain": code["domain"],
+                    "domain": resolve_domain(code["domain"]),
                 }
 
         if not scores:

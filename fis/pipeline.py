@@ -2,6 +2,7 @@
 
 from pathlib import Path
 
+from fis.db.codes import resolve_domain, resolve_subject
 from fis.db.connection import get_config
 from fis.db.models import (
     compute_sha256,
@@ -113,10 +114,10 @@ class FISPipeline:
             classification = self.classifier.classify(text, all_keywords, spacy_entities)
             confidence = classification["confidence"]
 
-        # 7. Generate slug and proposed filename
+        # 7. Generate slug and proposed filename (resolve through code layer)
         slug = text_to_slug(all_keywords, self.slug_max)
-        domain = classification["domain"]
-        subjects = classification["subjects"]
+        domain = resolve_domain(classification["domain"])
+        subjects = [resolve_subject(s) for s in classification["subjects"]]
         subject_str = "-".join(subjects[:3])
 
         # Determine status
