@@ -29,15 +29,22 @@ def compute_sha256(file_path: str) -> str:
 def get_next_sequence_id() -> str:
     with _db() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT COALESCE(MAX(sequence_id::int), 0) + 1 AS next_id FROM files")
+            cur.execute("SELECT LPAD(NEXTVAL('files_sequence_id_seq')::text, 6, '0') AS next_id")
             row = cur.fetchone()
-            return str(row["next_id"]).zfill(6)
+            return row["next_id"]
 
 
 def file_exists_by_hash(sha256: str) -> dict | None:
     with _db() as conn:
         with conn.cursor() as cur:
             cur.execute("SELECT * FROM files WHERE sha256 = %s LIMIT 1", (sha256,))
+            return cur.fetchone()
+
+
+def file_exists_by_path(file_path: str) -> dict | None:
+    with _db() as conn:
+        with conn.cursor() as cur:
+            cur.execute("SELECT * FROM files WHERE file_path = %s LIMIT 1", (file_path,))
             return cur.fetchone()
 
 
@@ -101,6 +108,53 @@ def insert_tags(file_id: int, tags: list[dict]):
                     (file_id, tag["tag"], tag.get("source", "yake"), tag.get("confidence")),
                 )
             conn.commit()
+
+
+def insert_file_with_tags(
+    *,
+    original_name: str,
+    file_path: str,
+    sha256: str,
+    tags: list[dict],
+    domain: str = None,
+    subject_codes: list = None,
+    slug: str = None,
+    proposed_name: str = None,
+    confidence: float = None,
+    status: str = "pending",
+    sequence_id: str = None,
+) -> dict:
+    seq_id = sequence_id or get_next_sequence_id()
+    with _db() as conn:
+        with conn.cursor() as cur:
+            cur.execute(
+                """
+                INSERT INTO files
+                    (sequence_id, original_name, proposed_name, file_path,
+                     domain, subject_codes, slug, sha256, status, confidence,
+                     source_path, classified_at)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                RETURNING *
+                """,
+                (
+                    seq_id, original_name, proposed_name, file_path,
+                    domain, subject_codes, slug, sha256, status, confidence,
+                    file_path, datetime.now(),
+                ),
+            )
+            row = cur.fetchone()
+
+            for tag in tags:
+                cur.execute(
+                    """
+                    INSERT INTO file_tags (file_id, tag, source, confidence)
+                    VALUES (%s, %s, %s, %s)
+                    """,
+                    (row["file_id"], tag["tag"], tag.get("source", "yake"), tag.get("confidence")),
+                )
+
+        conn.commit()
+        return row
 
 
 def insert_correction(file_id: int, old: dict, new: dict):

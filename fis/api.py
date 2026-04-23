@@ -29,6 +29,7 @@ from urllib.parse import parse_qs, urlparse
 class FISAPIHandler(BaseHTTPRequestHandler):
     _pipeline = None
     _bil = None
+    _api_token = None
 
     @classmethod
     def get_pipeline(cls):
@@ -73,6 +74,10 @@ class FISAPIHandler(BaseHTTPRequestHandler):
             self._json_response({"error": "not found"}, 404)
 
     def do_POST(self):
+        if not self._authorized():
+            self._json_response({"error": "unauthorized"}, 401)
+            return
+
         path = urlparse(self.path).path
         body = self._read_body()
 
@@ -201,7 +206,17 @@ class FISAPIHandler(BaseHTTPRequestHandler):
     def _cors_headers(self):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type, X-FIS-Token")
+
+    def _authorized(self) -> bool:
+        if self._api_token is None:
+            from fis.db.connection import get_config
+            config = get_config()
+            token = config.get("api", "shared_secret", fallback="").strip()
+            self.__class__._api_token = token
+        if not self._api_token:
+            return True
+        return self.headers.get("X-FIS-Token", "") == self._api_token
 
     def log_message(self, format, *args):
         from fis.log import get_logger
@@ -209,10 +224,13 @@ class FISAPIHandler(BaseHTTPRequestHandler):
 
 
 def start_api(port=8420):
+    from fis.db.connection import get_config
     from fis.log import get_logger
     log = get_logger("api")
-    server = HTTPServer(("0.0.0.0", port), FISAPIHandler)
-    log.info("FIS API running on http://localhost:%d", port)
+    config = get_config()
+    host = config.get("api", "host", fallback="127.0.0.1")
+    server = HTTPServer((host, port), FISAPIHandler)
+    log.info("FIS API running on http://%s:%d", host, port)
     server.serve_forever()
 
 

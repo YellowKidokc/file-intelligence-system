@@ -1,6 +1,8 @@
 -- FIS Database Schema
 -- Run: psql -h 192.168.1.97 -U fis_user -d fis_db -f 01_schema.sql
 
+CREATE SEQUENCE IF NOT EXISTS files_sequence_id_seq START WITH 1;
+
 CREATE TABLE IF NOT EXISTS files (
     file_id        SERIAL PRIMARY KEY,
     sequence_id    TEXT UNIQUE NOT NULL,          -- 000147

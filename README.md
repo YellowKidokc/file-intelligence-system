@@ -88,6 +88,11 @@ python -m fis.watcher
 python -m fis.backfill --path "O:\_Theophysics_v3"
 ```
 
+## Security Defaults
+
+- API now binds to `127.0.0.1` by default (configurable in `[api].host`).
+- Optional shared-secret auth is available via `[api].shared_secret`; when set, POST requests must include `X-FIS-Token`.
+
 ## Hotkeys
 
 | Key | Action |

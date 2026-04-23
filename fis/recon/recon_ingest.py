@@ -14,9 +14,9 @@ from fis.db.connection import get_config
 from fis.db.models import (
     compute_sha256,
     file_exists_by_hash,
+    file_exists_by_path,
     get_next_sequence_id,
-    insert_file,
-    insert_tags,
+    insert_file_with_tags,
 )
 from fis.log import get_logger
 from fis.nlp.engines import YakeEngine, SpacyEngine, text_to_slug
@@ -36,6 +36,9 @@ ANALYSIS_TAG_MAP = {
 # Reuse shared engine instances
 _yake = None
 _spacy = None
+_classifier = None
+_training_buffer = []
+_training_batch_size = None
 
 
 def _get_yake():
@@ -57,6 +60,50 @@ def _get_spacy():
             terms = None
         _spacy = SpacyEngine(custom_terms=terms)
     return _spacy
+
+
+def _get_classifier():
+    global _classifier
+    if _classifier is None:
+        from fis.nlp.classifier import FISClassifier
+        _classifier = FISClassifier()
+    return _classifier
+
+
+def _get_training_batch_size() -> int:
+    global _training_batch_size
+    if _training_batch_size is None:
+        config = get_config()
+        _training_batch_size = int(config.get("recon", "training_batch_size", fallback="25"))
+    return _training_batch_size
+
+
+def _buffer_training_example(text: str, keywords: list[dict], domain: str, subject: str):
+    _training_buffer.append({
+        "text": text,
+        "keywords": keywords,
+        "domain": domain,
+        "subject": subject,
+    })
+
+    batch_size = _get_training_batch_size()
+    if len(_training_buffer) >= batch_size:
+        _flush_training_buffer()
+
+
+def _flush_training_buffer():
+    if not _training_buffer:
+        return
+
+    batch = list(_training_buffer)
+    _training_buffer.clear()
+    classifier = _get_classifier()
+    classifier.learn(
+        texts=[item["text"] for item in batch],
+        keywords_list=[item["keywords"] for item in batch],
+        domains=[item["domain"] for item in batch],
+        subjects=[item["subject"] for item in batch],
+    )
 
 
 def has_frontmatter(file_path: str) -> bool:
@@ -125,6 +172,15 @@ def ingest(file_path: str) -> dict:
     path = Path(file_path)
     if not path.exists():
         return {"error": f"File not found: {file_path}"}
+    resolved_path = str(path.resolve())
+
+    existing_by_path = file_exists_by_path(resolved_path)
+    if existing_by_path:
+        return {
+            "status": "already_tracked",
+            "existing_id": existing_by_path["sequence_id"],
+            "message": f"Already tracked: {existing_by_path['final_name'] or existing_by_path['original_name']}",
+        }
 
     # Hash check
     sha256 = compute_sha256(file_path)
@@ -211,8 +267,7 @@ def ingest(file_path: str) -> dict:
 
     # If no domain/subject from frontmatter, fall back to classifier
     if domain == "--" and not subjects:
-        from fis.nlp.classifier import FISClassifier
-        classifier = FISClassifier()
+        classifier = _get_classifier()
         classification = classifier.classify(body, yake_keywords, spacy_entities)
         domain = resolve_domain(classification["domain"])
         subjects = [resolve_subject(s) for s in classification["subjects"]]
@@ -240,20 +295,6 @@ def ingest(file_path: str) -> dict:
     proposed_name = f"{slug}_{domain}.{subject_str}_{seq_id}{ext}"
 
     # Store in Postgres
-    result = insert_file(
-        original_name=path.name,
-        file_path=str(path.resolve()),
-        sha256=sha256,
-        domain=domain,
-        subject_codes=subjects,
-        slug=slug,
-        proposed_name=proposed_name,
-        confidence=confidence,
-        status=status,
-        sequence_id=seq_id,
-    )
-
-    # Store tags: NLP keywords + frontmatter tags
     tags = [{"tag": kw["keyword"], "source": kw["source"], "confidence": kw.get("score")}
             for kw in yake_keywords]
     for ent in spacy_entities:
@@ -265,20 +306,31 @@ def ingest(file_path: str) -> dict:
     if fm_concept_mapping:
         tags.append({"tag": fm_concept_mapping, "source": "concept_mapping"})
 
-    insert_tags(result["file_id"], tags)
+    result = insert_file_with_tags(
+        original_name=path.name,
+        file_path=resolved_path,
+        sha256=sha256,
+        domain=domain,
+        subject_codes=subjects,
+        slug=slug,
+        proposed_name=proposed_name,
+        confidence=confidence,
+        status=status,
+        sequence_id=seq_id,
+        tags=tags,
+    )
 
     # Feed as training label to classifier if high confidence
     if confidence >= 80.0 and domain != "--":
         try:
-            from fis.nlp.classifier import FISClassifier
-            classifier = FISClassifier()
-            classifier.learn(
-                texts=[body[:2000]],
-                keywords_list=[yake_keywords],
-                domains=[domain],
-                subjects=[subjects[0]] if subjects else ["GN"],
+            _buffer_training_example(
+                text=body,
+                keywords=yake_keywords,
+                domain=domain,
+                subject=subjects[0] if subjects else "GN",
             )
-            log.info("TRAIN fed recon label: %s.%s (%.0f%%)", domain, subjects[0], confidence)
+            log.info("TRAIN buffered recon label: %s.%s (%.0f%%, batch=%d/%d)",
+                     domain, subjects[0], confidence, len(_training_buffer), _get_training_batch_size())
         except Exception as e:
             log.error("Failed to feed training label: %s", e)
 

@@ -28,7 +28,9 @@ class FISClassifier:
         self.subject_encoder = LabelEncoder()
 
         self._fitted = False
+        self.max_text_chars = 2000
         self._load_if_exists()
+        self._load_runtime_config()
 
     def _load_if_exists(self):
         model_path = self.model_dir / "classifier.pkl"
@@ -52,6 +54,27 @@ class FISClassifier:
                 "domain_encoder": self.domain_encoder,
                 "subject_encoder": self.subject_encoder,
             }, f)
+
+    def _load_runtime_config(self):
+        """Load runtime config values without hard dependency during unit tests."""
+        try:
+            from fis.db.connection import get_config
+            config = get_config()
+            self.max_text_chars = int(
+                config.get("learning", "max_text_chars", fallback=str(self.max_text_chars))
+            )
+        except Exception:
+            # Keep defaults if config is unavailable
+            pass
+
+    def _prepare_text(self, text: str) -> str:
+        """Sample text from start/middle/end to avoid head-only bias."""
+        max_chars = max(300, int(self.max_text_chars))
+        if len(text) <= max_chars:
+            return text
+        seg = max_chars // 3
+        mid_start = max(0, (len(text) // 2) - (seg // 2))
+        return text[:seg] + " " + text[mid_start:mid_start + seg] + " " + text[-seg:]
 
     def classify(self, text: str, keywords: list[dict], entities: list[dict]) -> dict:
         """Classify text into domain and subject codes.
@@ -119,15 +142,19 @@ class FISClassifier:
         domain = top_codes[0][1]["domain"]
         subjects = [c[0] for c in top_codes]
 
-        # Confidence based on top score relative to total possible
+        # Confidence blends absolute strength and top-vs-second margin.
         max_score = top_codes[0][1]["score"]
-        confidence = min(max_score * 10, 100.0)
+        second_score = top_codes[1][1]["score"] if len(top_codes) > 1 else 0
+        total_score = sum(c[1]["score"] for c in top_codes)
+        dominance = max_score / max(total_score, 1)
+        margin = (max_score - second_score) / max(max_score, 1)
+        confidence = min(100.0, 100.0 * (0.65 * dominance + 0.35 * margin))
 
         return {"domain": domain, "subjects": subjects, "confidence": confidence}
 
     def _ml_predict(self, text: str, keywords: list[dict]) -> dict:
         """Use trained ML model to predict domain and subject."""
-        combined = text[:2000] + " " + " ".join(k["keyword"] for k in keywords)
+        combined = self._prepare_text(text) + " " + " ".join(k["keyword"] for k in keywords)
         X = self.vectorizer.transform([combined])
 
         domain_proba = self.domain_clf.predict_proba(X)[0]
@@ -145,10 +172,19 @@ class FISClassifier:
         return {"domain": domain, "subjects": subjects, "confidence": confidence}
 
     def _blend_results(self, rule: dict, ml: dict) -> dict:
-        """Blend rule-based and ML results, preferring higher confidence."""
-        if rule["confidence"] >= ml["confidence"]:
+        """Blend rule and ML confidence; let ML override when it is materially stronger."""
+        if ml["confidence"] >= rule["confidence"] + 8:
+            return ml
+        if rule["confidence"] >= ml["confidence"] + 8:
             return rule
-        return ml
+
+        # Close-call: preserve rule labels but smooth confidence with ML signal.
+        blended_conf = (0.6 * rule["confidence"]) + (0.4 * ml["confidence"])
+        return {
+            "domain": rule["domain"],
+            "subjects": rule["subjects"],
+            "confidence": blended_conf,
+        }
 
     def _expand_encoder(self, encoder: LabelEncoder, new_labels: list[str]):
         """Expand a LabelEncoder's classes to include any new labels."""
@@ -162,7 +198,7 @@ class FISClassifier:
         """Update the classifier from a batch of corrections."""
         combined = []
         for text, kws in zip(texts, keywords_list):
-            combined.append(text[:2000] + " " + " ".join(k["keyword"] for k in kws))
+            combined.append(self._prepare_text(text) + " " + " ".join(k["keyword"] for k in kws))
 
         if not self._fitted:
             # First time — full fit
